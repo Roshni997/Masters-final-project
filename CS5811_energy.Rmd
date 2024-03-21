@@ -1,0 +1,1118 @@
+---
+title: "Untitled"
+output: html_document
+---
+## Abstract 
+## 1.Importing Libraries
+## 1.1 Dataset Summary (description of dataset)
+## 1.2 Data Cleaning & Quality 
+## 2. EDA (Explanatory data analysis) - graphical analysis 
+## 2.1 PCA + visual analysis 
+## 2.2 Cluster Analysis 
+----- Machine learning 
+## Neural Networks 
+## Linear Regression
+## Performance Evaluation
+
+------
+
+## 1.Importing Libraries
+
+```{r}
+# Required libraries
+
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(data.table)
+library(psych)
+library(scales)
+library("ggstatsplot")
+library("rstantools")
+library(factoextra) # PCA
+library(wordcloud)  # word-cloud generator 
+library(RColorBrewer) # color palettes3
+library(tm)  # for text mining
+library(neuralnet)
+```
+
+ ##---Research Question: Predict the energy consumption/power generation based on weather conditions
+
+
+##  Importing Datasets 
+
+```{r}
+# Weather csv files 
+weather.daily <- read.csv("weather_daily.csv")
+weather.hourly <- read.csv("weather_hourly.csv")
+
+# Energy data set 
+energy.df <- read.csv("combined.csv")
+```
+
+
+## Joining Weather datasets 
+
+```{r}
+# Combined weather data set
+weather.df <- merge(weather.daily, weather.hourly, by=c("time","visibility","windBearing","icon","dewPoint","windSpeed",'pressure',"summary","precipType","humidity"), all.x=TRUE,all.y=FALSE)
+
+# Removing empty columns
+weather2 = select(weather.df, -c(temperature,apparentTemperature, cloudCover, uvIndex, icon))
+```
+
+```{r}
+# Data type conversion for date column before combining all data sets
+weather2$time <- as.Date(weather2$time)
+names(energy.df)[2] ="time"
+energy.df$time <- as.Date(energy.df$time)
+```
+
+
+## Joining all datasets 
+
+```{r}
+# Combined weather&energy dataset 
+energyvibes<- inner_join(weather2, energy.df, by="time")
+names(energyvibes)[1] ="date"
+```
+
+
+## Data Cleaning 
+
+```{r}
+# Feature reduction
+energy <- subset(energyvibes, select = -c(apparentTemperatureHighTime,
+                                          apparentTemperatureLowTime, sunsetTime, sunriseTime,
+                                         apparentTemperatureMinTime,
+                                          uvIndexTime,apparentTemperatureHigh,
+                                          apparentTemperatureLow, apparentTemperatureMaxTime,
+                                          temperatureMaxTime, 
+                                          temperatureMinTime, apparentTemperatureMax,
+                                         apparentTemperatureMin, temperatureHighTime, 
+                                          temperatureLowTime, energy_std, LCLid, energy_count))
+```
+
+```{r}
+# Removing variables from memory
+rm(weather.daily)
+rm(weather.hourly)
+rm(weather.df)
+rm(weather2)
+rm(energy.df)
+rm(energyvibes)
+```
+
+```{r}
+# Data type conversion
+energy$windBearing <- as.numeric(energy$windBearing)
+energy$energy_median <- as.numeric(energy$energy_median)
+energy$energy_mean   <- as.numeric(energy$energy_mean)
+energy$energy_max    <- as.numeric(energy$energy_max)
+energy$energy_sum    <- as.numeric(energy$energy_sum)
+energy$energy_min    <- as.numeric(energy$energy_min)
+energy$precipType    <- as.factor(energy$precipType)
+```
+
+
+## Imputing missing values 
+
+```{r}
+# Checking how many missing values each column has 
+colSums(is.na(energy))
+```
+
+```{r}
+# Imputing missing values by replacing them with the mean 
+median_energy <- mean(energy$energy_median, na.rm = T)
+mean_energy <- mean(energy$energy_mean, na.rm = T)
+max_energy <- mean(energy$energy_max, na.rm = T)
+min_energy <- mean(energy$energy_min, na.rm = T)
+sum_energy <- mean(energy$energy_sum, na.rm = T)
+
+# Replace the missing values with the mean
+energy[is.na(energy$energy_median), 'energy_median'] = median_energy
+energy[is.na(energy$energy_mean), 'energy_mean'] = mean_energy
+energy[is.na(energy$energy_max), 'energy_max'] = max_energy
+energy[is.na(energy$energy_min), 'energy_min'] = min_energy
+energy[is.na(energy$energy_sum), 'energy_sum'] = sum_energy
+
+# Checking the dimension and missing values to make sure there are none
+dim(energy)
+colSums(is.na(energy))
+```
+
+
+## Removing outliers
+
+```{r}
+## Removing outliers
+# Boxplots of all variables 
+# This gives an insight into outliers compared to numerical variables
+
+num_df <- energy %>% select(where(is.numeric))
+boxplot(num_df, main = "Outliers", col = "green", border = "black", las = 2 )
+
+# outliers: pressure, windSpeed, energy_sum,mean, std,max and min
+```
+
+
+```{r}
+# Removing outliers
+#1 energy_median
+median_weather_energy = boxplot(energy$energy_median)
+min_median_energy     = min(median_weather_energy$out)
+energy_weather_data_outliers = energy[energy$energy_median <
+                                                      min_median_energy, ]
+
+#2 energy_max
+max_weather_energy = boxplot(energy_weather_data_outliers$energy_max)
+min_max_energy     = min(max_weather_energy$out)
+energy_weather_data_outliers = energy_weather_data_outliers[energy_weather_data_outliers$energy_max <
+                                                        min_max_energy, ]
+
+#3 energy_min
+min_weather_energy  = boxplot(energy_weather_data_outliers$energy_min)
+min_min_energy      = min(min_weather_energy$out)
+energy_weather_data_outliers = energy_weather_data_outliers[energy_weather_data_outliers$energy_min <
+                                                       min_min_energy, ]
+
+#4 windSpeed
+wind_weather_energy  = boxplot(energy_weather_data_outliers$windSpeed)
+min_wind_energy      = min(wind_weather_energy$out)
+energy_weather_data_outliers = energy_weather_data_outliers[energy_weather_data_outliers$windSpeed <
+                                                      min_wind_energy, ]
+
+#5 energy_mean
+mean_weather_energy = boxplot(energy_weather_data_outliers$energy_mean)
+min_mean_energy     = min(mean_weather_energy$out)
+energy_weather_data_outliers = energy_weather_data_outliers[energy_weather_data_outliers$energy_mean <
+                                                              min_mean_energy, ]
+
+#6 Pressure
+pressure_weather_energy = boxplot(energy_weather_data_outliers$pressure)$out
+energy_weather_data_outliers <- energy_weather_data_outliers[-c(which(energy_weather_data_outliers$pressure
+                                                                      %in% pressure_weather_energy)),]
+
+```
+
+```{r}
+# Clearing up memory 
+rm(wind_weather_energy)
+rm(mean_weather_energy)
+rm(min_weather_energy)
+rm(max_weather_energy)
+rm(median_weather_energy)
+rm(num_df)
+rm(pressure_weather_energy)
+```
+
+
+## Data Quality check 
+
+```{r}
+# Validating the quality of the data
+summary(energy_weather_data_outliers)
+```
+
+These values are all possible.
+
+## Stratified sampling
+
+```{r}
+# Stratified sampling
+set.seed(10)
+energy_clean <- energy_weather_data_outliers %>%
+group_by(date) %>%
+ sample_n(., 3)
+```
+
+```{r}
+# Clearing memory
+rm(energy)
+rm(energy_weather_data_outliers)
+rm(max_energy)
+rm(mean_energy)
+rm(median_energy)
+rm(min_energy)
+rm(min_max_energy)
+rm(min_mean_energy)
+rm(min_median_energy)
+rm(min_min_energy)
+rm(min_wind_energy)
+rm(sum_energy)
+```
+
+```{r}
+# Check for duplicates
+sum(duplicated(energy_clean))
+```
+
+
+### Exploratory Data Analysis
+
+###. Summary statistics
+
+```{r}
+# load the the data set if needed
+#data(energy_clean)
+
+# inspect the data set
+str(energy_clean)
+
+# summary
+summary(energy_clean)
+```
+
+
+## Visual Analysis 
+
+```{R}
+#Graph plotting
+# energy_meanmean
+hist(energy_clean$energy_mean, 
+     main="Mean Energy Consumption", xlab="energy_mean", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$energy_mean), lty = 2)
+  legend('topright', 'mean energy consumption', lty = 2, bty = 'n')
+
+# energy_median  
+hist(energy_clean$energy_median, 
+     main="Median Energy Consumption", xlab="energy_median", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$energy_median), lty = 2)
+  legend('topright', 'median energy consumption mean', lty = 2, bty = 'n')
+  
+
+# energy_max    
+hist(energy_clean$energy_max, 
+     main="Maximum Energy Consumption", xlab="energy_max", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$energy_max), lty = 2)
+  legend('topright', 'maximum energy consumption mean', lty = 2, bty = 'n')
+  
+# energy_sum
+hist(energy_clean$energy_sum,
+     main="Sum of Energy Consumption", xlab="energy_sum", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$energy_sum), lty = 2)
+  legend('topright', 'Sum energy consumption mean', lty = 2, bty = 'n')
+  
+# energy_min  
+hist(energy_clean$energy_min,
+     main="Min of Energy Consumption", xlab="energy_min", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$energy_min), lty = 2)
+  legend('topright', 'Minimum energy consumption mean', lty = 2, bty = 'n')
+  
+# windSpeed  
+hist(energy_clean$windSpeed,
+     main="Wind Speed", xlab="windSpeed", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$windSpeed), lty = 2)
+  legend('topright', 'Wind speed mean', lty = 2, bty = 'n')
+  
+# pressure  
+hist(energy_clean$pressure,
+     main="Atmospheric pressure", xlab="pressure", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$pressure), lty = 2)
+  legend('topright', 'Pressure mean', lty = 2, bty = 'n')
+
+# humidity  
+hist(energy_clean$humidity,
+     main="Humidity", xlab="humidity", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$humidity), lty = 2)
+  legend('topright', 'Humidity mean', lty = 2, bty = 'n')
+
+# temperatureMax  
+hist(energy_clean$temperatureMax,
+     main="Maximum temperature", xlab="maximum temperature", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$temperatureMax), lty = 2)
+  legend('topright', 'Maximum temperature mean', lty = 2, bty = 'n')
+  
+# temperatureLow  
+hist(energy_clean$temperatureLow,
+     main="Low temperature", xlab="low temperature", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$temperatureLow), lty = 2)
+  legend('topright', 'Low temperature mean', lty = 2, bty = 'n')
+
+# temperatureMin  
+hist(energy_clean$temperatureMin,
+     main="Minimum temperature", xlab="minimum temperature", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$temperatureMin), lty = 2)
+  legend('topright', 'Maximum temperature mean', lty = 2, bty = 'n')
+
+# temperatureHigh  
+hist(energy_clean$temperatureHigh,
+     main="High temperature", xlab="high temperature", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$temperatureHigh), lty = 2)
+  legend('topright', 'High temperature mean', lty = 2, bty = 'n')
+  
+# moonPhase
+hist(energy_clean$moonPhase,
+     main="Moon phase", xlab="moon phase", border="blue",
+     col="green", las=1)
+  abline(v = mean(energy_clean$moonPhase), lty = 2)
+  legend('topright', 'Moon phase mean', lty = 2, bty = 'n')
+```
+
+## Word Cloud
+
+```{r}
+# setting seed so word cloud is reproducible
+set.seed(20)
+
+# Removing spaces
+words = paste(energy_clean$summary, collapse = " ")
+
+# Removing redundant words
+words = stringr::str_replace_all(words,"throughout","")
+words = stringr::str_replace_all(words,"mostly","")
+words = stringr::str_replace_all(words,"starting","")
+words = stringr::str_replace_all(words,"evening","")
+words = stringr::str_replace_all(words,"partly","")
+words = stringr::str_replace_all(words,"afternoon","")
+words = stringr::str_replace_all(words,"overnight","")
+words = stringr::str_replace_all(words,"morning","")
+
+# Wordcloud
+wordcloud(words = words, min.freq = 1,
+          max.words=1000, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+
+```
+
+## Correlation
+
+```{r}
+# Subsetting numerical variables for correlation
+energy_corr <- energy_clean %>%
+  dplyr::select(where(is.numeric))
+
+# removing time and energy count because its still there
+energy_corr <- energy_corr[, -1]
+
+# calculate an initial person correlation coefficient for each pair of variables
+cor(energy_corr)
+
+```
+
+## Correlation Map
+*this tells us how many numerical variables are highly correlated (anything above +-0.75 we should double check)*
+
+```{r}
+# Create Correlation map of variables
+corr.set <- select_if(energy_clean,is.numeric)
+corr.set <- corr.set[,-1]
+corr.matrix = round(cor(corr.set),2)
+corr.matrix 
+
+
+# Function
+get_upper_tri <- function(corr.matrix){
+    corr.matrix[lower.tri(corr.matrix)]= NA
+    return(corr.matrix)
+}
+
+
+# using upper triangle function to return the upper half of the correlation map
+upper_tri <- get_upper_tri(corr.matrix)
+upper_tri
+
+
+# Upper Triangle( heatmap)
+melt_cormat <- melt(upper_tri, na.rm = TRUE)
+
+
+# Creating the Heatmap
+ggheatmap = ggplot(data = melt_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed()
+
+
+# Adding the coefficients onto the heatmap
+corelcoef = ggheatmap + geom_text(aes(Var2, Var1, label = value), color = "black", size = 2) +
+theme( 
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(), 
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.position = c(0.6, 0.7),
+  legend.direction = "horizontal")+ guides(fill = guide_colorbar(barwidth = 7, barheight = 1, 
+                                                                 title.position = "top", 
+                                                                 title.hjust = 0.5))
+
+# Print 
+corelcoef
+
+# Removing from memory
+rm(numericset)
+
+```
+
+
+## Further removal of variables
+
+```{r}
+# memory clean up 
+rm(corr.set)
+rm(ggheatmap)
+rm(melt_cormat)
+rm(upper_tri)
+rm(corr.matrix)
+rm(corelcoef)
+rm(energy_corr)
+rm(get_upper_tri)
+rm(words)
+```
+
+## 4. Principle Component Analysis
+# Preparing the data for PCA 
+
+```{r}
+## Feature selection
+# For PCA all variables need to be numerical, PCA can deal with highlight correlated variables,
+numeric.df = energy_clean %>% 
+  select(visibility, windBearing, 
+         windSpeed,pressure, 
+         humidity, temperatureLow,
+         temperatureHigh,
+         energy_mean, energy_max,
+          energy_min, moonPhase, dewPoint)
+
+# Remove time because for some reason its still there
+numeric.df <- numeric.df[,-1]
+
+# Categorical variables that have been removed prior to running PC:
+#time, summary and precipType
+```
+
+
+```{r}
+# For PCA to work, variables must not have a variance = 0
+## this code will check which variables are non-constant, and make a new df with
+### the variables that can be used for PCA
+
+var_df <- numeric.df %>%
+  select_if(function(v) var(v, na.rm=TRUE) != 0)  
+var_df %>% colnames()  # this line of code returns the variables that are non-constant
+
+```
+
+
+## PCA    
+
+```{r} 
+# perform PCA
+pca_energy <- prcomp(var_df, center = T, scale. = T)
+```
+
+
+# Visual analysis of PCA results
+
+```{r}
+# calculate the proportion of explained variance (PEV) from the std values
+pc_energy_var <- pca_energy$sdev^2
+pc_energy_var
+pc_energy_PEV <- pc_energy_var / sum(pc_energy_var)
+pc_energy_PEV
+
+```
+
+
+```{r}
+# Summary of PCA, provides more precise information on each PC loading
+summary(pca_energy)
+```
+
+PC1 explains 24% of the variation, PC2 = 17%, PC3 = 13%, PC4 = 11%, PC5 = 8% and PC6 = 7%. Just over 80% of the total variance of this data set can be explained by the first 6 PC loadings.
+
+
+```{r}
+fviz_eig(pca_energy, addlabels = TRUE)
+```
+
+```{r}
+# plot the cumulative value of PEV for increasing number of additional PCs
+#   note: add an 80% threshold line to inform the feature extraction
+
+plot(
+  cumsum(pc_energy_PEV),
+  ylim = c(0,1),
+  xlab = 'PC',
+  ylab = 'cumulative PEV',
+  pch = 20,
+  col = 'orange' 
+)
+abline(h = 0.8, col = 'red', lty = 'dashed')
+
+# get and inspect the loadings for each PC
+#   note: loadings are reported as a rotation matrix
+pc_energy_loadings <- pca_energy$rotation
+pc_energy_loadings
+```
+
+The graph shows that the first 6 PCA loadings explain just over 80% of the variance in the data set.
+
+```{r}
+# plot the loadings for the first three PCs as a barplot
+
+colvector = c('red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'pink', 'coral', 'palevioletred2',
+              'darkorchid1', 'aquamarine3', 'darkolivegreen3')
+labvector = c('PC1', 'PC2', 'PC3')
+barplot(
+  pc_energy_loadings[,c(1:3)],
+  beside = T,
+  yaxt = 'n',
+  names.arg = labvector,
+  col = colvector,
+  ylim = c(-1,1),
+  border = 'white',
+  ylab = 'loadings'
+)
+axis(2, seq(-1,1,0.1))
+legend(
+  'bottomright',
+  bty = 'n',
+  col = colvector,
+  pch = 15,
+  row.names(pc_energy_loadings)
+)
+
+```
+
+```{r}
+# These plots make it easier to see contributions of each variable on the first six PCs
+fviz_contrib(pca_energy, choice = "var", axes = 1, top = 6)
+fviz_contrib(pca_energy, choice = "var", axes = 2, top = 6)
+fviz_contrib(pca_energy, choice = "var", axes = 3, top = 6)
+fviz_contrib(pca_energy, choice = "var", axes = 4, top = 6)
+fviz_contrib(pca_energy, choice = "var", axes = 5, top = 6)
+fviz_contrib(pca_energy, choice = "var", axes = 6, top = 6)
+```
+
+Temperature high, low and dewpoint contribute to PC1 the most. The energy variables contribute to PC2. The third and fourth PC has contributions from more weather variables. The fifth PC has contributions from a non-weather variable (moonphase) and windbearing.
+
+```{r}
+# Biplots 
+biplot(
+  pca_energy,
+  scale = 0,
+  col = c('light grey','orange')
+)
+biplot(
+  pca_energy,
+  choices = c(1,3),
+  scale = 0,
+  col = c('light grey','orange')
+)
+biplot(
+  pca_energy,
+  choices = c(2,3),
+  scale = 0,
+  col = c('light grey','orange')
+)
+biplot(
+  pca_energy,
+  choices = c(1,4),
+  scale = 0,
+  col = c('light grey','orange')
+)
+biplot(
+  pca_energy,
+  choices = c(1,5),
+  scale = 0,
+  col = c('light grey','orange')
+)
+```
+PC's describe variation and account for the varied influences of original characteristics.
+Temperature high and low and dewpoint are further away from the PC origin, so they have more influence on PC1. the energy variables affect PC2 more. The 90 degree angle between these groups shows that they are unlikely to be correlated.
+
+There is a correlation between all the energy variables; temperature low and high; windspeed and humidity. There seems to be a negative correlation between humidity and windspeed, and temperature low and high.
+Though because the PC loadings are quite low, and about 6 of the PC loadings make up just over 80%, this may not be the best method to visualise the data.
+
+```{r}
+fviz_pca_var(pca_energy)
+```
+
+
+```{r}
+var_energy <- get_pca_var(pca_energy)
+set.seed(10)
+energy_km <- kmeans(var_energy$coord, centers = 3, nstart = 20)
+energy_cluster <- as.factor(energy_km$cluster)
+
+fviz_pca_var(pca_energy, col.var = energy_cluster,
+palette = c('red', 'blue', 'green'), legend.title = "Cluster")
+```
+
+It is interesting to see humidity grouped with energy variables. I'm not sure why that is.
+
+```{r}
+# Feature reduction (variables that had a high correlation)
+energy_clean$temperatureMax = NULL
+energy_clean$temperatureMin = NULL
+energy_clean$dewPoint = NULL
+energy_clean$energy_sum = NULL
+```
+
+
+## Machine Learning
+
+## Neural network data preperation
+
+```{r}
+MinMax <- function(x){
+  tx <- (x - min(x)) / (max(x) - min(x))
+  return(tx)
+}
+```
+
+```{r}
+# Remove non-numeric variables, as well as variables that will not be used in the nn
+energy_numeric <- energy_clean[, -c(1,6,7,12,14,15)]
+```
+
+```{r}
+# Apply the min-max function
+energy_minmax <- apply(energy_numeric, 2, MinMax)
+
+energy_minmax <- as.data.frame(energy_minmax)
+
+rm(energy_numeric)
+```
+
+```{r}
+# Change precipType to factor
+energy_minmax$precipType <- energy_clean$precipType
+energy_minmax$precipType <- as.factor(energy_minmax$precipType)
+
+# Change precipType to numeric for nn
+energy_minmax$precipType <- as.numeric(energy_minmax$precipType)
+summary(energy_minmax$precipType)
+```
+
+```{r}
+# 70/30 training split
+n_rows <- nrow(energy_minmax)
+training_idx <- sample(n_rows, n_rows * 0.7)
+training_energy <- energy_minmax[training_idx,]
+test_energy <- energy_minmax[-training_idx,]
+```
+
+
+## Neural network training
+
+```{r}
+# writing the formula
+energy_formula = energy_mean ~ visibility + windBearing + windSpeed + pressure + humidity + temperatureLow + temperatureHigh + moonPhase + precipType
+```
+
+```{r}
+energy_nn1 <- neuralnet(energy_formula, data = training_energy)
+```
+
+```{r}
+energy_nn5 <- neuralnet(energy_formula, hidden = 5, data = training_energy, stepmax = 1e+06)
+```
+
+```{r}
+energy_nn3_2 <- neuralnet(energy_formula, hidden = c(3,2), data = training_energy)
+```
+
+```{r}
+plot(energy_nn1)
+```
+
+```{r}
+plot(energy_nn5)
+```
+
+```{r}
+plot(energy_nn3_2)
+```
+
+
+## Neural network prediction
+
+```{r}
+pred_energy_nn_1 <- compute(energy_nn1, test_energy[,-9])
+pred_energy_nn_5 <- compute(energy_nn5, test_energy[,-9])
+pred_energy_nn_3_2 <- compute(energy_nn3_2, test_energy[,-9])
+```
+
+```{r}
+energy_results <- data.frame(
+  actual = test_energy$energy_mean,
+  nn_1 = pred_energy_nn_1$net.result,
+  nn_5 = pred_energy_nn_5$net.result,
+  nn_3_2 = pred_energy_nn_3_2$net.result
+)
+```
+
+
+```{r}
+# calculate the correlation between actual and predicted values to identify the best predictor
+cor(energy_results[,'actual'], energy_results[,c("nn_1", "nn_5", "nn_3_2")])
+```
+
+
+## Second round at nn, with a different activation function
+
+```{r}
+energy_n1 <- neuralnet(energy_formula, data = training_energy, act.fct = "tanh")
+```
+
+```{r}
+energy_n5 <- neuralnet(energy_formula, hidden = 5, data = training_energy, act.fct = "tanh")
+```
+
+```{r}
+energy_n32 <- neuralnet(energy_formula, hidden = c(3,2), data = training_energy, act.fct = "tanh", stepmax = 1e+06)
+```
+
+
+# Testing prediction
+```{r}
+pred_energy_n1 <- compute(energy_n1, test_energy[,-9])
+pred_energy_n5 <- compute(energy_n5, test_energy[,-9])
+pred_energy_n32 <- compute(energy_n32, test_energy[,-9])
+```
+
+```{r}
+energy_results2 <- data.frame(
+  actual = test_energy$energy_mean,
+  n1 = pred_energy_n1$net.result,
+  n5 = pred_energy_n5$net.result,
+  n32 = pred_energy_n32$net.result
+)
+```
+
+# Checking the correlation between actual and predicted
+```{r}
+cor(energy_results2[,'actual'], energy_results2[,c("n1", "n5", "n32")])
+```
+
+Worse with this activation function.
+
+# Third round - more hidden layers
+
+```{r}
+energy_n55 <- neuralnet(energy_formula, hidden = c(5,5), data = training_energy, stepmax = 1e+06)
+```
+
+```{r}
+energy_n11 <- neuralnet(energy_formula, hidden = c(1,1), data = training_energy)
+```
+
+```{r}
+energy_n442 <- neuralnet(energy_formula, hidden = c(4,4,2), data = training_energy, stepmax = 1e+06)
+```
+
+# Prediction
+```{r}
+pred_energy_n55 <- compute(energy_n55, test_energy[,-9])
+pred_energy_n11 <- compute(energy_n11, test_energy[,-9])
+pred_energy_n442 <- compute(energy_n442, test_energy[,-9])
+```
+
+```{r}
+energy_results3 <- data.frame(
+  actual = test_energy$energy_mean,
+  n11 = pred_energy_n11$net.result,
+  n55 = pred_energy_n55$net.result,
+  n442 = pred_energy_n442$net.result
+)
+```
+
+```{r}
+cor(energy_results3[,'actual'], energy_results3[,c("n55", "n11", "n442")])
+```
+
+n11 is so far the highest, three nodes doesn't seem to work any better.
+
+## Round four
+
+```{r}
+energy_10 <- neuralnet(energy_formula, hidden = 10, data = training_energy, stepmax = 1e+06)
+```
+
+```{r}
+energy_n211 <- neuralnet(energy_formula, hidden = c(2,1,1), data = training_energy, stepmax = 1e+06)
+```
+
+
+```{r}
+pred_energy10 <- compute(energy_10, test_energy[,-9])
+pred_energy211 <- compute(energy_n211, test_energy[,-9])
+```
+
+```{r}
+energy_results4 <- data.frame(
+  actual = test_energy$energy_mean,
+  n10 = pred_energy10$net.result,
+  n211 = pred_energy211$net.result
+)
+```
+
+```{r}
+cor(energy_results4[,'actual'], energy_results4[,c("n10", "n211")])
+```
+
+
+## Round five - working with 1-3 nodes and multiple hidden layers
+
+```{r}
+energy_n222 <- neuralnet(energy_formula, hidden = c(2,2,2), data = training_energy, stepmax = 1e+06)
+```
+
+```{r}
+energy_n321 <- neuralnet(energy_formula, hidden = c(3,2,1), data = training_energy, stepmax = 1e+06)
+```
+
+# Prediction
+```{r}
+pred_energy222 <- compute(energy_n222, test_energy[,-9])
+pred_energy321 <- compute(energy_n321, test_energy[,-9])
+```
+
+```{r}
+energy_results5 <- data.frame(
+  actual = test_energy$energy_mean,
+  n222 = pred_energy222$net.result,
+  n321 = pred_energy321$net.result
+)
+```
+
+# Correlation between actual and predicted variables
+```{r}
+cor(energy_results5[,'actual'], energy_results5[,c("n222", "n321")])
+```
+
+So far n11 is the highest.
+
+# plotting the best fit with a bad fit
+```{r}
+plot(
+  energy_results4$actual,
+  energy_results4$n10,
+  col = 'blue',
+  xlab = 'actual strength',
+  ylab = 'predicted strength',
+  xlim = c(0,1),
+  ylim = c(0,1)
+)
+points(
+  energy_results3$actual,
+  energy_results3$n11,
+  col = 'orange'
+)
+legend(
+  'topleft',
+  c('n10', 'n11'),
+  pch = 1,
+  col = c('blue', 'orange'),
+  bty = 'n'
+)
+
+```
+
+
+```{r}
+plot(energy_results3$actual, energy_results3$n11, col = 'red', main = "Real vs Predicted")
+```
+
+## Round six - different formula
+
+```{r}
+# writing the formula
+energy_formula2 = energy_mean ~ visibility + windSpeed + pressure + humidity + temperatureLow + temperatureHigh + precipType
+```
+
+```{r}
+energy_neural1 <- neuralnet(energy_formula2,hidden = c(1,1), data = training_energy)
+```
+
+```{r}
+energy_neural5 <- neuralnet(energy_formula2, hidden = 5, data = training_energy, stepmax = 1e+06)
+```
+
+```{r}
+energy_neural32 <- neuralnet(energy_formula2, hidden = c(3,2), data = training_energy)
+```
+
+```{r}
+pred_energy_neural1 <- compute(energy_neural1, test_energy[,-9])
+pred_energy_neural5 <- compute(energy_neural5, test_energy[,-9])
+pred_energy_neural32 <- compute(energy_neural32, test_energy[,-9])
+```
+
+```{r}
+energy_results6 <- data.frame(
+  actual = test_energy$energy_mean,
+  neural1 = pred_energy_neural1$net.result,
+  neural5 = pred_energy_neural5$net.result,
+  neural32 = pred_energy_neural32$net.result
+)
+```
+
+
+```{r}
+# calculate the correlation between actual and predicted values to identify the best predictor
+cor(energy_results6[,'actual'], energy_results6[,c("neural1", "neural5", "neural32")])
+```
+
+
+
+## Linear regression
+
+```{r}
+# Subsetting the data
+energy_data_for_lm <- energy_clean[, -c(1,6,12,14,15)]
+energy_data_for_lm$precipType <- as.factor(energy_data_for_lm$precipType)
+
+summary(energy_data_for_lm$precipType)
+
+```
+
+```{r}
+# 70/30 split
+n_rows1 <- nrow(energy_data_for_lm)
+training_idx1 <- sample(n_rows1, n_rows1 * 0.7)
+training_energy_lm <- energy_data_for_lm[training_idx1,]
+test_energy_lm <- energy_data_for_lm[-training_idx1,]
+```
+
+```{r}
+# Linear model
+energy_lm <- lm(I(energy_mean^2) ~ visibility + windBearing + windSpeed + pressure + I(humidity^2) + temperatureLow + temperatureHigh + moonPhase + precipType, data = training_energy_lm)
+```
+
+```{r}
+summary(energy_lm)
+```
+
+The r square value is very low, which is not great. There is one significant co-effecient which is pressure.
+
+
+## Performance evaluation
+# Looking at actual vs predicted results
+
+```{r}
+results <- data.frame(actual = training_energy$energy_mean, prediction = energy_n11$net.result)
+results
+```
+
+# Mean square error for nn
+
+```{r}
+predict.nn <- pred_energy_n11$net.result*(max(energy_minmax$energy_mean)-min(energy_minmax$energy_mean))+min(energy_minmax$energy_mean)
+
+test.r <- (test_energy$energy_mean)*(max(energy_minmax$energy_mean)-min(energy_minmax$energy_mean))+min(energy_minmax$energy_mean)
+
+Mse.nn <- sum((test.r - predict.nn)^2)/nrow(test_energy)
+```
+
+
+# Mean square error for lm
+
+```{r}
+pr.lm <- predict(energy_lm, test_energy_lm)
+mse.lm <- sum((pr.lm - test_energy_lm$energy_mean)^2)/nrow(test_energy_lm)
+```
+
+# Looking at the MSE for the LM and NN
+```{r}
+print(paste(mse.lm, Mse.nn))
+```
+
+It looks like the linear model better predicted energy_mean.The MSE shows on average how many units away from true values. MSE shows error rate.
+
+```{r}
+sqrt(Mse.nn)
+```
+
+
+# Plotting lm and nn predictions vs actual
+
+```{r}
+plot(test_energy$energy_mean,predict.nn,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+legend('bottomright',legend='NN',pch=18,col='red', bty='n')
+
+plot(test_energy$energy_mean,pr.lm,col='blue',main='Real vs predicted lm',pch=18, cex=0.7)
+legend('bottomright',legend='LM',pch=18,col='blue', bty='n', cex=.95)
+```
+
+Despite the low mse values, the model fit is not good. This could be an issue with the variables used in the model. Another potential reason for this result could be that the data is more suited to classification methods.
+
+
+# Cross validation
+
+The data used here are two more stratified samples of the data set, and is already prepared for NN with the minmax function applied to it.
+
+```{r}
+energy_cross_valid <- read.csv("energy_cross_v.csv")
+energy_cross_valid_2 <- read.csv("energy_cross_v2.csv")
+```
+
+This code is a for loop that will split the data for training and testing,fit the model and test it on the test data and carry out a MSE for performance evaluation. This is repeated three times. Two stratified samples of the original data set are taken here just to have more valid results (as valid as they can be).
+
+```{r}
+cv.error <- NULL
+k <- 3
+
+for(i in 1:k){
+    index <- sample(1:nrow(energy_cross_valid),round(0.7*nrow(energy_cross_valid)))
+    train.cv <- energy_cross_valid[index,]
+    test.cv <- energy_cross_valid[-index,]
+    nn <- neuralnet(energy_formula,data=train.cv,hidden=c(1,1),linear.output=T)   
+    pr.nn <- compute(nn,test.cv[,-9])
+    pr.nn <- pr.nn$net.result*(max(energy_cross_valid$energy_mean)-min(energy_cross_valid$energy_mean))+min(energy_cross_valid$energy_mean)   
+    test.cv.r <- (test.cv$energy_mean)*(max(energy_cross_valid$energy_mean)-min(energy_cross_valid$energy_mean))+min(energy_cross_valid$energy_mean)   
+    cv.error[i] <- sum((test.cv.r - pr.nn)^2)/nrow(test.cv)    
+}
+```
+
+```{r}
+cv.error
+mean(cv.error)
+```
+
+The scores represent how many units (on average) away from true values.
+
+```{r}
+cv.error <- NULL
+k <- 3
+
+for(i in 1:k){
+    index <- sample(1:nrow(energy_cross_valid_2),round(0.7*nrow(energy_cross_valid_2)))
+    train.cv <- energy_cross_valid_2[index,]
+    test.cv <- energy_cross_valid_2[-index,]
+    nn <- neuralnet(energy_formula,data=train.cv,hidden=c(1,1),linear.output=T)   
+    pr.nn <- compute(nn,test.cv[,-9])
+    pr.nn <- pr.nn$net.result*(max(energy_cross_valid_2$energy_mean)-min(energy_cross_valid_2$energy_mean))+min(energy_cross_valid_2$energy_mean)   
+    test.cv.r <- (test.cv$energy_mean)*(max(energy_cross_valid_2$energy_mean)-min(energy_cross_valid_2$energy_mean))+min(energy_cross_valid_2$energy_mean)   
+    cv.error[i] <- sum((test.cv.r - pr.nn)^2)/nrow(test.cv)    
+}
+```
+
+```{r}
+cv.error
+mean(cv.error)
+```
+
