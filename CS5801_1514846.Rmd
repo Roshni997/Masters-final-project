@@ -1,0 +1,623 @@
+---
+title: "CS5801 Coursework"
+author: "1514846"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+version: 1.0
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tree)
+```
+
+# 1. Organise and clean the data
+
+## 1.1 Subset the data into the specific dataset allocated
+
+```{r}
+load(file = "CS5801_data.rda")
+my2teams.df <- subset(CS5801.data, teamID.x == "CHN" | teamID.x == "LAA")
+```
+
+
+## 1.2 Data quality analysis
+
+To assess the quality of the data, I will:
+1. Check for missing values
+2. Check for any duplications within the data subset
+3. Check that the structure of the variables in the dataset is correct.
+4. Check for any outliers.
+
+Firstly, I will rename the column names to make them clearer.
+
+```{r}
+names(my2teams.df) [3] = "Games"
+names(my2teams.df) [4] = "Runs"
+names(my2teams.df) [5] = "Hits"
+names(my2teams.df) [6] = "AtBats"
+names(my2teams.df) [7] = "RunsBattedIn"
+```
+
+###  1. Missing Values:
+
+When eyeballing the data, I did not see any outliers, but I will still double check with an r code.
+
+```{r}
+sum(is.na(my2teams.df))
+```
+
+There are no missing values in this dataset.
+
+### 2. Duplication:
+
+Now checking if there are duplicate rows in the dataset.
+```{r}
+duplicated(my2teams.df$playerID)
+```
+
+There are two duplications in this data set, in row 68 and 73. I will remove them as there is no need for two sets of the same data.
+
+```{r}
+# First finding the player in row 68 and 73
+my2teams.df[68,]
+my2teams.df[73,]
+
+# Double checking the duplicated row:
+my2teams.df[my2teams.df$playerID == "wadats01", ]
+my2teams.df[my2teams.df$playerID == "richaga01", ]
+```
+
+```{r}
+# Removing the duplicated row and creating a new dataframe:
+df.2teams <- my2teams.df[-c(68, 73),]
+```
+
+The new dataframe 'df.2teams' now shows two less observations in the environment pane.
+
+###  3. Structure:
+
+I will now look at the way the data has been structured by R and check if any modifications are needed.
+
+```{r}
+str(df.2teams)
+```
+
+Hit Indicator has been labelled as numeric, however, it is binary, there are only 2 possible categories for this vector, so I will change it to a categorical variable.
+
+```{r}
+
+# "1" in hit.ind means that the player has made atleast 1 hit, whereas 0 means they have not made any hits. I am going to rewrite this in the data set so that it is less confusing, especially in the analysis later on.
+
+df.2teams$hit.ind <- ifelse(df.2teams$hit.ind == 0, "no hit", "hit")
+
+# Change hit.ind to a categorical variable
+# And write a code to check that is is categorical class()
+df.2teams$hit.ind <- as.factor(df.2teams$hit.ind)
+
+class(df.2teams$hit.ind)  #This code will check that hit.ind is categorical
+
+```
+
+Now I will check the summary of the data:
+
+```{r}
+summary(df.2teams)
+```
+
+ The max number of games that can be played in major league baseball is 162 (REF), so there is no issue there.
+ The max number of AtBats can be more than 630, so there is also no issue there. [1](https://www.quora.com/How-many-times-does-the-average-MLB-player-go-to-bat-per-year)
+ The oldest player is 37 years old, however there are players in the MLB that are this age and older. [2](https://www.businessinsider.com/highest-paid-mlb-players-2015-5?r=US&IR=T#1-clayton-kershaw--30-million-1)
+  
+There are some issues that need to be corrected here:
+ 1. The minimum for height is 39 inches. 
+ 2. The maximum weight is 315, this is unlikely for a MLB player, who has to do lots of running and exercise.
+ 3. The min salary of $500
+ 4. Birth-date seems to be incorrect, if the youngest player was born in 2001, and considering this data was taken in 2015, this would mean the player was 14 at the time. However, you need to be atleast 18 to be in the MLB. Despite birth-date having incorrect values, age of players seem to be fine. 
+ 5. The max career length is 35, whereas the oldest player is 37. This does not add up.
+ 
+To make sure that these are outliers that are present in the dataset, I will plot height, weight, salary on a boxplot, as they are continuous variables.
+
+###  4. Outliers:
+
+```{r}
+ggplot(df.2teams, aes(height)) + geom_boxplot() + theme_bw()
+ggplot(df.2teams, aes(weight)) + geom_boxplot() + theme_bw()
+ggplot(df.2teams, aes(salary, options(scipen=5))) + geom_boxplot() + theme_bw()
+```
+
+The boxplot for height and weight do show 1 outlier each. However, in the salary boxplot, 3 outliers are shown but from the opposite end of what I was expecting. There are 3 outliers for players earning more, rather than the salary of $500 seen in the summary output.
+
+Before I address the issues with salary, I will correct the outliers for height and weight.
+
+Starting with height:
+
+```{r}
+# First, locating the player whose height is 39 inches.
+df.2teams[df.2teams$height == 39, ]
+```
+
+The height of this player is disproportionate to the weight (195 pounds), and if this were to be true than this player would be overweight, which it is unlikely as they are professional baseball player.
+
+The summary table shows a minimum weight of 170, so this player does not weigh the least. This means that there was an error in writing in this data. As I do not want to lose the rest of this players data, I will impute the height with the mean height of all the players.
+
+
+```{r}
+df.2teams$height[df.2teams$height == 39] <- 72.94
+
+# Checking the players updated height
+df.2teams[df.2teams$playerID == "declatn01", ]
+```
+
+Now I will correct the weight:
+
+```{r}
+# Locating the player who is 315 pounds
+df.2teams[df.2teams$weight == 315, ]
+```
+
+This player is 315 with a height of 76 inches. This weight at this height for a baseball player is highly unlikely, as there are players that are 290lbs that are 83 inches tall. [3] (https://www.azsnakepit.com/2010/7/5/1550963/baseball-players-does-size-matter) 
+Looking at the data of the player, not only is there an issue with the weight, but also with the career length. This row of data shows the player to be 30 years old, with a career spanning over 24 years. This is not plausible, as you have to be 18 to join the MLB. There are more than 1 inconsistency in this players row of data, which makes me question the validity of this particular row of data. Consequently, I am going to remove this row of data.
+
+```{r}
+# Finding the row number for this player
+(df.2teams$playerID == "diazjj02")
+```
+
+This player is row 70.
+
+```{r}
+# Removing the player
+df.2teams <- df.2teams[-c(70),]
+```
+
+I would like to plot a histogram of salary, just to check the distribution, as the boxplot of salary showed outliers on the higher end of salary.
+
+```{r}
+ggplot(df.2teams, aes(x = salary)) + geom_histogram(bins = 35) + theme_bw()
+```
+
+It is possible for MLB players to earn $24 million. [4](https://www.businessinsider.com/highest-paid-mlb-players-2015-5?r=US&IR=T)
+I do not think there is a big difference in salary for the three points at the end, the biggest difference in the plot shows a difference in salary of approximately about $5 million. This histogram does show that there is a player that is not making as much as the rest, this is likely to be the player that was shown in the summary table as having the minimal value of 500.255.
+ 
+Correcting salary:
+ 
+```{r}
+# Locating the row for the player with a salary of $500.255
+df.2teams[df.2teams$salary == 500.255, ]
+```
+
+Looking at the career length, this looks to be a mistake in inputting the data, so I will correct it as I do not want to lose the data.
+
+```{r}
+# This code is to get an idea at around how many figures other players with the same career length are earning
+df.2teams %>%
+        select(career.length, salary) %>%
+        filter(career.length >= 7.9, career.length <= 9) %>%  #filter career length so we only get players with 8 years.
+        arrange(desc(salary)) # arrange in descending order
+```
+
+The last row is the player who's salary I am correcting. Ignoring the last row, this table shows the range to be between 12000000.000 (8 figures) and 5525000.000 (7 figures). There is a mix of 7 figures and 8 figures and it is difficult to tell what the salary of this player would be.
+
+```{r}
+df.2teams %>%
+        select(career.length, salary, Games, Runs, Hits, RunsBattedIn) %>%
+        filter(career.length >= 7.9, career.length <= 9) %>%  #filter career length so we only get players with 8 years.
+        arrange(desc(salary))
+```
+
+Even though it seems like a clear typing error, it is difficult to see what to impute it to instead. It is difficult to gauge what it can be replaced to, even after seeing how many games the they have each played and their performance, how many figures the players can earn. I will instead change the players salary to NA.
+
+```{r}
+# Replace the old value
+df.2teams$salary[df.2teams$salary == 500.255] <- NA
+```
+
+```{r}
+# Checking the correction
+df.2teams[df.2teams$playerID == "davisaj02", ]
+```
+
+As we see here, salary has now been changed.
+
+Correcting the birthdate:
+
+I believe this data was collected around 2015-01-12, at the end of the baseball season.
+I will create a new column that has ages calculated from the players date of birth and 1/11/2015. As I cannot narrow down the exact dates the data was collected, I will allow a difference of 1 year between the age calculated and the age that came in the dataset.
+
+```{r}
+# First I will add a column that will have the ages rounded
+df.2teams$age.rounded <- round(df.2teams$age)
+```
+
+```{r}
+#calculating the ages based on the birthdate provided in the data set
+Age.calc.from.birthdate <- difftime(as.Date("2015-01-11"), df.2teams$birthDate, units = "weeks")/52.25
+
+#I have experimented with the code above by changing the first date "as.Date("2015-01-11)" and have narrowed the date to when the data was collected which is around 2015-01-11
+
+# Now I will compare the age i calculated to the age in the data frame
+round.age.from.birthdate <- round(Age.calc.from.birthdate)
+df.2teams$age.rounded == round.age.from.birthdate
+```
+
+The ages seem to be correct apart from 2.
+
+There are 2 players with birth-dates that show that they are less than 22 years old.
+They are rows 68 and 71.
+
+Since the ages are correct, I can calculate the correct birthdate of the player by just subtracting the age from the date I found.
+
+```{r}
+df.2teams[68,]
+df.2teams[71,]
+```
+
+The player on row 68 is born in 2001, and player on row 71 is born in 2000. This is not feasible as the dataset was collected in 2015, which would make the players 14 and 15, respectively.
+
+```{r}
+# As seen earlier most of the birthdays seem accurate, so I will calculate the birthdate from the age and impute the correct birthdates:
+# Player on row 68 and 71 are both 29 years old:
+2015 - 29
+```
+
+This is the year they were born in.
+
+```{r}
+#Double checking I have it  birthdate
+difftime(as.Date("2015-12-31"), as.Date("1986-08-12"), units = "weeks")/52.25
+difftime(as.Date("2015-12-31"), as.Date("1986-09-23"), units = "weeks")/52.25
+```
+
+
+```{r}
+# Now I will input the correct date of birth
+# Player on row 68 was born on the 8th of December
+df.2teams[df.2teams$playerID == "cozarza01", "birthDate"] <- as.Date("1986-08-12")
+# Player for row 71
+df.2teams[df.2teams$playerID == "chambdd03", "birthDate"] <- as.Date("1986-09-23")
+```
+
+Now I will just double check that the date has been inputted:
+
+```{r}
+df.2teams[68,]
+df.2teams[71,]
+```
+
+Correcting the career length:
+
+```{r}
+#the oldest player is 37 years old. The min age listed in the summary table was 22.85
+37-22.85
+```
+
+The max amount of career length that a player can have in this data set is 14.2 years.
+
+```{r}
+# Locating the row of players that have a career length of over 15 years
+df.2teams[df.2teams$career.length > 14.2, ]
+```
+
+There is one player who has a career length of 35, even though their age is 26. There is no way to know how long this players career length is, so I am going to remove this value and replace it with NA.
+
+```{r}
+df.2teams$career.length[df.2teams$career.length > 14.2] <- NA
+```
+
+I am checking to make sure that players do not have a career length longer than their age.
+
+```{r}
+# Checking through to make sure that career length and age match up
+df.2teams %>%
+  select(playerID, career.length, age) %>%
+  arrange(career.length)
+```
+
+Lastly I will check whether if players have been accurately put in hit and no hit categories.
+
+```{r}
+df.2teams %>%
+  select(playerID, hit.ind, Runs, RunsBattedIn, Hits, AtBats, Games) %>%
+  arrange(hit.ind)
+```
+
+Looking at this table, on the last page, there is a one player who has been labelled as scoring a hit when they have not, and another player has been put in the category of scoring no hits when they have.
+
+Also on page 7 on this list, one player (wadats01) has made 1 run but has no hits. This is possible to do, if a player was hit by the pitched ball, they are awarded first base. [5](http://m.mlb.com/glossary/standard-stats/hit-by-pitch). There seem to be no other issues here with the other variables.
+
+```{r}
+# Locating the players
+df.2teams[df.2teams$playerID == "gonzeto02", ]
+df.2teams[df.2teams$playerID == "frazimh02", ]
+```
+
+```{r}
+# Changing gonzeto82 to "no hits"
+df.2teams[df.2teams$playerID == "gonzeto02","hit.ind"] <- "no hit"
+
+# Changing frazimh02 to "hits"
+df.2teams[df.2teams$playerID == "frazimh02","hit.ind"] <- "hit"
+```
+
+```{r}
+# Checking that it is correct
+df.2teams[df.2teams$playerID == "gonzeto02", ]
+df.2teams[df.2teams$playerID == "frazimh02", ]
+```
+
+
+## 1.3 Data cleaning  
+ 
+To conclude with data cleaning, I will briefly outline what issues that had been dealt with were present in the dataset. There were two duplicates in the data set, which were removed. There were a few outliers concerning height (which was corrected), weight (this player was deleted), and salary (this was also corrected).Two of the players' birthdays were incorrect,and there was an issue with career length being longer than the players age - both of these were corrected.Finally there was an issue where a player that had been labelled as having 'no hit' but did in fact have hits, and a player that was mislabeled as having hits when they didn't.
+
+# 2. Exploratory Data Analysis (EDA)
+
+## 2.1 EDA plan
+
+First, a summary of the data will be checked, then uni-variate visualisations of the data to check if the data is normally distributed. Then multi-variate visualisations will be done to check for any relationships between the variables to see if there is any relationships between them.
+
+## 2.2 EDA and summary of results  
+
+
+```{r}
+summary(df.2teams)
+```
+From the look of these statistics, it seems that there may be some skew present in this dataset, for example the mean number of runs is 16.72, but the max is 104.
+
+Univariate visualisations of discrete and continuous numerical variables:
+```{r}
+# Discrete variables:
+ggplot(df.2teams, aes(x = Games)) + geom_histogram(bins=10) + theme_bw()    #Games
+ggplot(df.2teams, aes(x = Runs)) + geom_histogram(bins=10) + theme_bw()     #Runs
+ggplot(df.2teams, aes(x = Hits)) + geom_histogram(bins=10) + theme_bw()     #Hits
+ggplot(df.2teams, aes(x = AtBats)) + geom_histogram(bins=10) + theme_bw()   #AtBats
+ggplot(df.2teams, aes(x = RunsBattedIn)) + geom_histogram(bins=10) + theme_bw() #RunsBattedIn
+```
+
+All of these histograms are heavily skewed to the right.
+
+```{r}
+# Continuous variables
+ggplot(df.2teams, aes(x = weight)) + geom_histogram(bins = 15) + theme_bw()             #weight
+ggplot(df.2teams, aes(x = height)) + geom_histogram(bins = 10) + theme_bw()             #height
+ggplot(df.2teams, aes(x = salary, scipen = 999)) + geom_histogram(bins = 15) + theme_bw()  #salary
+ggplot(df.2teams, aes(x = career.length)) + geom_histogram(bins = 5) + theme_bw()       #career length
+ggplot(df.2teams, aes(x = age)) + geom_histogram(bins = 20) + theme_bw()                #age
+```
+
+The distributions for the height and weight seem to have a somewhat symmetric distribution, whereas salary seems to be right skewed. Age is also skewed to the right, this could be due to the "outlier" (one player is 37).
+
+categorical variables:
+```{r}
+# Categorical variables
+ggplot(df.2teams, aes(bats, color = bats, fill = bats)) + geom_bar() 
+ggplot(df.2teams, aes(hit.ind, color = hit.ind, fill = hit.ind)) + geom_bar()
+```
+
+The first bar plot tells us there are more right handed players. The second bar plot shows that there are more players that have made a hit than players that have not made a hit.
+
+
+Multivariate analysis:
+I would like to see if there is a relationship between these to variables. To do so I will do a table analysis.
+ 
+```{r}
+table(df.2teams$hit.ind, df.2teams$bats)
+```
+
+```{r}
+fisher.test(table(df.2teams$hit.ind, df.2teams$bats))
+```
+The p value is above 0.05, so there 2 variables do not seem to be dependent on each other.
+
+Multivariate visualisations of continuous variables:
+I will subset the data so it only contains the numeric variables
+
+```{r}
+teams.df.sub <- subset(df.2teams, select=c("Games", "Runs", "Hits", "AtBats", "RunsBattedIn", "weight", "height", "salary", "career.length", "age"))
+
+pairs(teams.df.sub, panel = panel.smooth)
+```
+
+There looks to be a positive linear relationship between age and career length, hits and atbats, and a weak positive relationship between height and weight. There also seems to be a non linear relationship between games and runs, and runs and atbats.
+
+```{r}
+cor(teams.df.sub, use = "complete.obs")
+```
+
+Multi-collinearity can affect models predictions. In this case the stronger relationships are between the games, runs, hits and at bats and runs batted in. This is understandable as there is a relationship between these variables will be correlated, as naturally, the more games you play, the higher the likelihood of having more runs, hits, at bats and runs batted in.
+
+
+## 2.3 Additional insights and issues
+
+There are some issues of skewed data, which can be due to the outliers found during the data quality check (e.g. salary), as well as multicollinearity between variables such as games, runs, atbats and runsbattedin.
+
+# 3. Modelling
+
+## 3.1 Build a model for player salary
+
+The null hypothesis is: Salary does not have an affect on the other variables
+The alternative hypothesis is: Salary does have an effect on the other variables
+
+Firstly, I will use a tree model to see if there are any complex interactions.
+
+```{r}
+teams.tree <- tree(df.2teams$salary~., data = teams.df.sub)
+plot(teams.tree)
+text(teams.tree)
+```
+
+This tree diagram shows that career length is further away, and is the most important factor the affects salary. Career length is important indicator of salary when a player has a career length less than 8 years. When career length is greater than 8 years, the number of games played is an important factor. 
+
+As there are both numerical and categorical data in this data set, I will use ANCOVA.
+
+Because the data was right-skewed and also had multi-collinearity, the first model will be a complicated model, containing quadratic terms (using square-root transformation to improve distribution) in order to transform the data and meet the assumptions of regression of normality. This is the maximal model.
+
+```{r}
+ancova.1 <- lm(salary~career.length+Games+age+height+weight+AtBats+Runs+RunsBattedIn+Hits+hit.ind+bats+I (career.length^2)+I(Games^2)+I(age^2)+I(height^2)+I(weight^2)+I(AtBats^2)+I(Runs^2)+I(RunsBattedIn^2)+I(Hits^2), data = df.2teams)
+summary(ancova.1)
+```
+
+This model has a high f statistic, and the r squared is good. There are no significant coefficients.This could be due to overfitting. This model needs to be simplified as it is very complex. To do this, I will use the step function.
+
+```{r}
+ancova.2 <- step(ancova.1)
+```
+
+The AIC reduced from the first model, which is good.
+
+```{r}
+summary(ancova.2)
+```
+
+Like the tree model, this model also shows significant coefficients for career length, games, age and height. There is also a good r square value (0.61) and the f statistic is significant.
+
+I will attempt to remove the transformed Runs variable as it is not significant, to see if this improves this model.
+
+```{r}
+ancova.3 <- lm(formula = salary ~ age + Runs + Hits + I(career.length^2) + I(Games^2) + I(age^2) + I(height^2) + I(Hits^2), data = df.2teams)
+summary(ancova.3)
+```
+
+The f value has become more significant, however the r-squared value has dropped, meaning it explains less of the data fit. Whilst some of the coefficients have become more significant (such as age and runs) but other coefficients have gone in the opposite direction and have become less significant (such as hits). This model was not very helpful, I will stick to the previous model.
+
+I will plot the second model.
+```{r}
+plot(ancova.2)
+```
+
+There is a pattern in the first model. There is a weak fit for the qqplot.
+The influence of outliers are also present in the graph. However, due to the nature of the data, the outliers are realistic to the data.
+
+Perhaps a transformation of the dependent variable will help. As I transforming the dependent variable, I will have to bring all the variables that I started with back in.
+
+```{r}
+ancova.4 <- lm(I(salary^2)~career.length+Games+age+height+weight+AtBats+Runs+RunsBattedIn+Hits+hit.ind+bats+I (career.length^2)+I(Games^2)+I(age^2)+I(height^2)+I(weight^2)+I(AtBats^2)+I(Runs^2)+I(RunsBattedIn^2)+I(Hits^2), data = df.2teams)
+summary(ancova.4)
+```
+
+This is a complex model, so I will use the step function to simplify it.
+
+```{r}
+step(ancova.4)
+```
+
+```{r}
+summary(ancova.4)
+```
+
+This has not helped at all. The f-statistic is significant, but the r squared value is not very good. There is only one significant coefficient.The more suitable model for showing salary seems to be the second model (ancova.2).
+
+
+## 3.2 Critique model using relevant diagnostics
+
+To answer this question, I will plot the summary and graph of the second model, as it was the most suitable.
+```{r}
+summary(ancova.2)
+plot(ancova.2)
+```
+
+An interpretation of this model: There are some significant differences in the variances (the f-statistic), 61% of the variance is explained by this model (r^2) which is good, and there are five significant coefficients here. Two of the significant coefficients are for age. The relationship between salary and career length is a positive relationship, as for every increase in career length by one, the salary increases by 1 (salary -7.657 + 1.002x salary). There is a significant p value for height - salary -7.657 + 3.752x height (for every increase of 1 in height, salary increases by 3.752). 
+
+There is also a negative relationship for age and salary (looking at the more significant coefficient, which is the transformed age), but a positive relationship for age as well (non-transformed variable). This result could be due to the skew seen during the EDA. Taking the more significant coefficient into account an interpretation of this would be salary -7.657 - 7.409x age. This relationship shows that for every increase in age of 1, salary is reduced by -7.409.
+
+There seems to be a pattern in the first Residuals vs Fitted plot, the points are gathered towards the beginning but seem to funnel out. There is not a lot of variance to in this plot. In the qqplot, there is a weak fit. A potential weakness seems to be the influence of outliers seems to be present in the graph, however, due to the nature of the data (the skew), the outliers are all realistic to the data.
+
+## 3.3 Suggest improvements to your model
+
+An alternative approach to address the issues would be to separate the categorical variables and the continuous variables. It could start off by using one way anova to analyse salary against bats (bats has three levels), and then use t-test to analyse salary against hit.ind. Then using multiple regression to analyse the rest of the continuous numerical variables against salary.
+
+# 4. Extension work
+
+## 4.1 Model the likelihood of a player having scored a Hit (using the hit.ind variable provided).
+
+Null hypothesis: Hit indicator does not effect the other variables.
+Alternative hypothesis:Hit indicator has an effect on the other variables.
+
+First I will do some multivariate exploratory data analysis, with hit.ind being the response variable. I will then model a tree diagram to see interactions. Finally, a logistic model will be done since the response variable is binary.
+
+Variables such as runs, hits, at bats and runs batted in will be excluded from inital EDA, as if a player has made no hit, then the scores for the rest of these variables are 0, therefore there will be no new findings from plotting for those variables.
+
+EDA:
+```{r}
+ggplot(df.2teams, aes(x = hit.ind, y = age)) + geom_boxplot()        #age
+ggplot(df.2teams, aes(x = hit.ind, y = salary)) + geom_boxplot()     #salary
+ggplot(df.2teams, aes(x = hit.ind, y = Games)) + geom_boxplot()      #games
+ggplot(df.2teams, aes(x = hit.ind, y = career.length)) + geom_boxplot() #career length
+ggplot(df.2teams, aes(x = hit.ind, y = height)) + geom_boxplot()    #height
+ggplot(df.2teams, aes(x = hit.ind, y = weight)) + geom_boxplot()    #weight
+```
+
+There is a noticeable difference in the median between hit.ind and games, and hit.ind and career length, as well as height. There is no big difference of hit.ind on age, weight and salary.
+
+I will create a subset of the data for this model. Runs, hits, atbats and runs batted in will be excluded from this model because  if you have not made a hit, then you will not have the opportunity to make a hit, run and have a runbattedin. Runs, hits and RBI are the effects of having made a hit or not rather than hit.ind being the the reason for making runs, hits and RBI. Additionally, they also have issues of multicollinearity.
+
+```{r}
+team.sub.log <- subset(df.2teams, select=c("Games", "weight", "height", "salary", "career.length", "age", "hit.ind", "bats"))
+
+# There is some NAs in the data set, which will prevent the step function from working
+team.sub.log <- na.omit(team.sub.log)
+```
+
+
+```{r}
+teams.tree1 <- tree(team.sub.log$hit.ind~., data = team.sub.log)
+plot(teams.tree)
+text(teams.tree)
+```
+This tree model shows that career length is a important factor that affects the hit.ind, and when career length is over 8 years, then the number of games played has an influence on hit.ind.
+
+
+As the data is skewed, I will add quadratic terms to the formula.
+```{r}
+logmodel1 <- glm(hit.ind ~career.length + Games + weight + height + salary + age + bats + I(Games^2) + I(salary^2) + I(career.length^2) + I(age^2), data = team.sub.log, family = "binomial")
+
+summary(logmodel1)
+```
+
+This model needs to be simplified.
+
+```{r}
+logmodel2 <- step(logmodel1)
+```
+
+```{r}
+summary(logmodel2)
+```
+We can reject the null hypothesis, as it seems that hit.ind does have an effect on games, as its p value is below 0.05. When plotting the tree model, career length seemed to have an effect on hit.ind, however, in this model it seems that it does not. This could be due to multi-collinearity issues between age and career length. I will run the model again without age.
+
+```{r}
+logmodel3 <- glm(hit.ind ~career.length + Games + weight + height + salary + bats + I(Games^2) + I(salary^2) + I(career.length^2), data = team.sub.log, family = "binomial")
+summary(logmodel3)
+```
+There is an improvement (p value is smaller) in career length in this model.
+
+```{r}
+logmodel4 <- step(logmodel3)
+```
+
+```{r}
+summary(logmodel4)
+```
+This summary output is the exact same as the summary output for logmodel2, there is no improvement.
+
+Now I will check the odds ratio.
+```{r}
+exp(coef(logmodel2))
+```
+
+The odds ratio shows that with every increase in weight there is an increase in the change that a player will get a hit. The odds ratio of games is nearly 1, which indicates barely any change on the hit indicator. 
+
+
+# References  
+[1] https://www.quora.com/How-many-times-does-the-average-MLB-player-go-to-bat-per-year
+  
+[2] https://www.businessinsider.com/highest-paid-mlb-players-2015-5?r=US&IR=T#1-clayton-kershaw--30-million-1
+
+[3] (https://www.azsnakepit.com/2010/7/5/1550963/baseball-players-does-size-matter) 
+
+[4] https://www.businessinsider.com/highest-paid-mlb-players-2015-5?r=US&IR=T
+
+[5] http://m.mlb.com/glossary/standard-stats/hit-by-pitch
+
